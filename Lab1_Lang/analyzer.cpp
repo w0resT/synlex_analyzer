@@ -29,13 +29,15 @@ void c_analyzer::analyze_file( ) {
 		return;
 	}
 
+	m_line_counter = 0;
+	std::vector< tokens::token_t > current_line_tokens;
+
 	std::string current_line;
 	while ( std::getline( file, current_line ) ) {
 		auto cur_tokens = tokens::get_tokens( current_line );
 
 		// ѕеред тем, как заносить, определ€ем очередность. ¬ текущей строке ищем все токены с самого начала,
 		// начинаем добавл€ть те, у которых позици€ 0, пробелы из строки после удалени убираем
-
 		while ( !cur_tokens.empty() ) 	{
 			for ( size_t i = 0; i < cur_tokens.size( ); ++i ) {
 				auto sc = current_line.find( ' ' );
@@ -49,11 +51,303 @@ void c_analyzer::analyze_file( ) {
 				auto pos = current_line.find( cur_elem.token );
 				if ( pos != std::string::npos && pos == 0 ) {
 					m_tokens.push_back( cur_elem );
+					current_line_tokens.push_back( cur_elem );
 					current_line.erase( current_line.begin( ), current_line.begin( ) + cur_elem.token.size( ) );
 					cur_tokens.erase( cur_tokens.begin() + i );
 				}
 			}
 		}
+
+		if ( !current_line_tokens.empty( ) ) {
+			m_tokens_by_line[ m_line_counter++ ] = current_line_tokens;
+		}
+
+		current_line_tokens.clear( );
+	}
+}
+
+/*
+* TODO:
+* Change thrd_elem etc for "next_elem". Rn its just for the better debugging.
+*/
+unsigned int c_analyzer::do_F( std::vector<tokens::token_t> &t, unsigned int _offset ) {
+	unsigned int j = _offset;
+	unsigned int return_j = j;
+
+	auto& cur_elem = t.at( j );
+	auto cur_type = cur_elem.basic_type;
+	auto& cur_token = cur_elem.token;
+
+	// ¬ конце фукнции текущий уровень должен быть равен уровню до начала, 
+	// т.е. мы прошли весь уровень и вернулись туда же
+	auto old_syn_level = m_syn_level;
+
+	if ( cur_type == tokens::TT_KEYWORD) {
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, "F" ) );
+		m_syn_level++;
+
+		if ( cur_token == "for" ) {
+			m_syntax_tree.push_back( syntax_tree( m_syn_level, cur_token ) ); // push_back ( "for" )
+
+			// Need to look for the next token. 
+			// Must be "(" - TT_OTHER
+			Assert( j + 1 < t.size( ) );
+			auto &next_elem = t.at( j + 1 );
+			if ( next_elem.basic_type == tokens::TT_OTHER && next_elem.token == "(" ) {
+				m_syntax_tree.push_back( syntax_tree( m_syn_level, next_elem.token ) ); // push_back ( "(" )
+
+				auto cur_j = do_T( t, j + 1 );
+
+				// Checking for "(" symbol
+				Assert( cur_j + 1 < t.size( ) );
+				auto &another_elem = t.at( cur_j + 1 );
+				if ( another_elem.basic_type == tokens::TT_OTHER && another_elem.token == ")" ) {
+					m_syntax_tree.push_back( syntax_tree( m_syn_level, another_elem.token ) ); // push_back ( ")" )
+
+					// Now we need to check if we have "do" 
+					Assert( cur_j + 2 < t.size( ) );
+					if ( t.at( cur_j + 2 ).basic_type == tokens::TT_KEYWORD && t.at( cur_j + 2 ).token == "do" ) {
+						m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at(cur_j + 2).token ) ); // push_back ( "do" )
+
+						// Need to do +1 to get next elem
+						return_j = do_F( t, cur_j + 3 );
+
+						// Ќет выражени€ => ошибка
+						/*if ( return_j == cur_j + 3 ) {
+							Assert( !"Expected F" );
+						}*/
+					}
+					else {
+#ifdef _DEBUG
+						std::cout << "[debug] unexpected token!" << std::endl;
+						std::cout << "[debug] token: " << t.at( cur_j + 2 ).token << ", type: " << type_to_str( t.at( cur_j + 2 ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+						Assert( !"Expected 'do'" );
+					}
+				}
+			}
+			else {
+#ifdef _DEBUG
+				std::cout << "[debug] unexpected token!" << std::endl;
+				std::cout << "[debug] token: " << cur_token << ", type: " << type_to_str( cur_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+
+#endif // _DEBUG
+				Assert( false );
+			}
+		}
+		else {
+#ifdef _DEBUG
+			std::cout << "[debug] unexpected token!" << std::endl;
+			std::cout << "[debug] token: " << cur_token << ", type: " << type_to_str( cur_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+
+#endif // _DEBUG
+			Assert( false );
+		}
+
+		// ”ходим из текущего уровн€
+		m_syn_level--;
+	}
+	else if ( cur_type == tokens::TT_ID ) {
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, "F" ) );
+		m_syn_level++;
+
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, cur_token ) ); // push_back ( a )
+
+		// Looking for the next token
+		Assert( j + 1 < t.size( ) );
+		if ( t.at( j + 1 ).basic_type == tokens::TT_OPERATION_SIGN) {
+			m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at( j + 1 ).token ) ); // push_back ( "=" )
+
+			Assert( j + 2 < t.size( ) );
+			if ( t.at( j + 2 ).basic_type == tokens::TT_ID || t.at( j + 2 ).basic_type == tokens::TT_NUMBER ) {
+				m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at( j + 2 ).token ) ); // push_back ( a )
+
+				return_j = j + 2;
+			}
+			else {
+#ifdef _DEBUG
+				std::cout << "[debug] unexpected token!" << std::endl;
+				std::cout << "[debug] token: " << t.at( j + 2 ).token << ", type: " << type_to_str( t.at( j + 2 ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+
+#endif // _DEBUG
+				Assert( false );
+			}
+		}
+		else {
+#ifdef _DEBUG
+			std::cout << "[debug] unexpected token!" << std::endl;
+			std::cout << "[debug] token: " << t.at( j + 1 ).token << ", type: " << type_to_str( t.at( j + 1 ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+
+#endif // _DEBUG
+			Assert( false );
+		}
+
+		// ”ходим из текущего уровн€
+		m_syn_level--;
+	}
+//	else {
+//#ifdef _DEBUG
+//		std::cout << "[debug] unexpected token!" << std::endl;
+//		std::cout << "[debug] token: " << cur_token << ", type: " << type_to_str( cur_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+//		
+//#endif // _DEBUG
+//		Assert( false );
+//	}
+
+	// ћы не вернулись на прежний уровень => где-то ошибка
+	Assert( old_syn_level == m_syn_level );
+
+	return return_j;
+}
+
+unsigned int c_analyzer::do_T( std::vector<tokens::token_t>& t, unsigned int _offset ) {
+	unsigned int return_i = _offset;
+
+	unsigned int i = _offset + 1;
+	Assert( i < t.size( ) );
+
+	m_syntax_tree.push_back( syntax_tree( m_syn_level, "T" ) );
+	m_syn_level++;
+
+	// ¬ конце фукнции текущий уровень должен быть равен уровню до начала, 
+	// т.е. мы прошли весь уровень и вернулись туда же
+	auto old_syn_level = m_syn_level;
+
+	// —начала запускаем F, тогда останутс€ только последние 2 случа€
+	auto ret_i = do_F( t, i );
+	if ( ret_i != i ) {
+		i = ret_i;
+		i++;
+	}
+
+	auto& cur_elem = t.at( i );
+	auto cur_type = cur_elem.basic_type;
+	auto& cur_token = cur_elem.token;
+
+	// "; E; F" и "; E;"
+	if ( cur_type == tokens::TT_OTHER && cur_token == ";" ) {
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, cur_token ) ); // push_back ( ";" )
+
+		i = do_E( t, i );
+
+		// Next symbol must be ";'
+		Assert( i + 1 < t.size( ) );
+		if ( t.at( i + 1 ).basic_type == tokens::TT_OTHER && t.at( i + 1 ).token == ";" ) {
+			m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at( i + 1 ).token ) ); // push_back ( ";" )
+			return_i = do_F( t, i + 2 );
+
+			// ≈сли вернули то же значение, значит ничего не изменилось.
+			// ¬озвращаем каретку обратно.
+			if ( return_i == i + 2 ) {
+				return_i--;
+			}
+		}
+		else {
+#ifdef _DEBUG
+			std::cout << "[debug] unexpected token!" << std::endl;
+			std::cout << "[debug] token: " << t.at( i + 1 ).token << ", type: " << type_to_str( t.at( i + 1 ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+			Assert( false );
+		}
+
+	}
+	else {
+#ifdef _DEBUG
+		std::cout << "[debug] unexpected token!" << std::endl;
+		std::cout << "[debug] token: " << cur_token << ", type: " << type_to_str( cur_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+		Assert( false );
+	}
+
+	// ћы не вернулись на прежний уровень => где-то ошибка
+	Assert( old_syn_level == m_syn_level );
+
+	// ¬ыходим из области “, а значит уменьшаем уровень
+	m_syn_level--;
+
+	// ¬озвращаем текущее положение каретки, чтобы при выходе попали на символ конца F
+	return return_i;
+}
+
+unsigned int c_analyzer::do_E( std::vector<tokens::token_t>& t, unsigned int _offset ) {
+	unsigned int return_i = _offset;
+
+	unsigned int i = _offset + 1;
+	Assert( i < t.size( ) );
+
+	auto& cur_elem = t.at( i );
+	auto cur_type = cur_elem.basic_type;
+	auto& cur_token = cur_elem.token;
+
+	m_syntax_tree.push_back( syntax_tree( m_syn_level, "E" ) );
+	m_syn_level++;
+
+	// ¬ конце фукнции текущий уровень должен быть равен уровню до начала, 
+	// т.е. мы прошли весь уровень и вернулись туда же
+	auto old_syn_level = m_syn_level;
+
+	// Main code
+	if ( cur_type == tokens::TT_ID || cur_type == tokens::TT_NUMBER ) {
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, cur_token ) ); // push_back ( a )
+
+		i++;
+		Assert( i < t.size( ) );
+		if ( t.at( i ).basic_type == tokens::TT_OPERATION_SIGN ) {
+			m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at( i ).token ) ); // push_back ( <, >, ==, = )
+
+			i++;
+			Assert( i < t.size( ) );
+			if ( t.at( i ).basic_type == tokens::TT_ID || t.at( i ).basic_type == tokens::TT_NUMBER ) {
+				m_syntax_tree.push_back( syntax_tree( m_syn_level, t.at( i ).token ) ); // push_back ( a )
+				return_i = i;
+			}
+			else {
+#ifdef _DEBUG
+				std::cout << "[debug] unexpected token!" << std::endl;
+				std::cout << "[debug] token: " << t.at( i ).token << ", type: " << type_to_str( t.at( i ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+				Assert( false );
+			}
+		}
+		else {
+#ifdef _DEBUG
+			std::cout << "[debug] unexpected token!" << std::endl;
+			std::cout << "[debug] token: " << t.at( i ).token << ", type: " << type_to_str( t.at( i ).basic_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+			Assert( false );
+		}
+	}
+	else {
+#ifdef _DEBUG
+		std::cout << "[debug] unexpected token!" << std::endl;
+		std::cout << "[debug] token: " << cur_token << ", type: " << type_to_str( cur_type ) << ", level: " << static_cast< int >( m_syn_level ) << std::endl;
+#endif // _DEBUG
+		Assert( false );
+	}
+
+	// ћы не вернулись на прежний уровень => где-то ошибка
+	Assert( old_syn_level == m_syn_level );
+
+	// ¬ыходим из области “, а значит уменьшаем уровень
+	m_syn_level--;
+
+	// ¬озвращаем текущее положение каретки, чтобы при выходе попали на символ конца F
+	return return_i;
+}
+
+void c_analyzer::syntax_analyze( ) {
+	if ( m_tokens.empty( ) ) {
+		return;
+	}
+	
+	for ( unsigned int i = 0; i < m_line_counter; ++i ) {
+		auto &cur_line_tokens = m_tokens_by_line[ i ];
+		m_syn_level = 0;
+
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, "S" ) );
+		m_syn_level++;
+		do_F( cur_line_tokens, 0 );
+		m_syntax_tree.push_back( syntax_tree( m_syn_level, ";" ) );
 	}
 }
 

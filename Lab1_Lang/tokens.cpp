@@ -58,14 +58,19 @@ std::vector<tokens::token_t> tokens::get_tokens( std::string str ) {
 
 	// Keywords?
 	for ( const auto& dw : dict_keywords ) {
-		size_t pos = str.find( dw );
-		if ( pos != std::string::npos && pos == 0 && str[ pos + dw.size( ) ] == ' ' ) {
-			current_token.basic_type = tokens::TT_KEYWORD;
-			current_token.token = str.substr( pos, dw.size( ) );
+		while ( str.find( dw ) != std::string::npos ) {
+			size_t pos = str.find( dw );
+			if ( pos != std::string::npos /*&& pos == 0*/ && (str[ pos + dw.size( ) ] == ' ') || str[ pos + dw.size( ) ] == '(' ) {
+				current_token.basic_type = tokens::TT_KEYWORD;
+				current_token.token = str.substr( pos, dw.size( ) );
 
-			vec_tokens.push_back( current_token );
+				vec_tokens.push_back( current_token );
 
-			str.erase( str.begin( ), str.begin( ) + dw.size( ) );
+				str.erase( str.begin( ) + pos, str.begin( ) + pos + dw.size( ) );
+			}
+			else {
+				break;
+			}
 		}
 	}
 
