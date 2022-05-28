@@ -23,7 +23,7 @@ int main( ) {
 			std::cout << type_to_str( t.basic_type ) << " | ";
 			std::cout << t.token << std::endl;
 
-			analyzer.insert( t.token, t.basic_type );
+			//analyzer.insert( t.token, t.basic_type );
 		}
 
 		/*auto test = analyzer.get_all_tokens( ).at(0);
